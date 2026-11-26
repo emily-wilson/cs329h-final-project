@@ -1,15 +1,15 @@
 import torch.nn as nn
 import torch
 from transformers import Trainer
-from emotion_vector_utils import EmotionAttributeDecoder, NUM_EMOTION_ATTRS
-from alignment_function_utils import BaseAlignmentFunction
+from steerable.emotion_vector_utils import EmotionAttributeDecoder, NUM_EMOTION_ATTRS
+from steerable.alignment_function_utils import BaseAlignmentFunction
 import random
 
 ## This model is trained to correctly choose between n options
 class SteerablePluralismModel(nn.Module):
-    def __init__(self, tokenizer):
+    def __init__(self, tokenizer, input_dim, hidden_dim):
         super(SteerablePluralismModel, self).__init__()
-        self.emotion_vector_model = EmotionAttributeDecoder()
+        self.emotion_vector_model = EmotionAttributeDecoder(input_dim, hidden_dim)
         self.alignment_function = BaseAlignmentFunction(NUM_EMOTION_ATTRS)
         self.tokenizer = tokenizer
         
@@ -40,8 +40,8 @@ class SteerablePluralismTrainer(Trainer):
         return torch.mean((fn_chosen > fn_rejected).float())
 
     def compute_loss(self, model, inputs, return_outputs = False, num_items_in_batch = None):
-        input_ids_chosen = inputs["input_ids_chosen"]
-        input_ids_rejected = inputs["input_ids_rejected"]
+        input_ids_chosen = inputs["chosen_input_ids"]
+        input_ids_rejected = inputs["rejected_input_ids"]
 
         n_samples = len(input_ids_chosen)
     
@@ -49,7 +49,7 @@ class SteerablePluralismTrainer(Trainer):
         context_ids_rejected = inputs["context_ids_rejected"]
 
         print(f"chosen input ids shape: {input_ids_chosen.shape}")
-        embeddings = model.tokenizer(input_ids_chosen + input_ids_rejected)
+        embeddings = model.tokenizer.encode(input_ids_chosen + input_ids_rejected)
         print(f"embeddings shape: {embeddings}")
 
         embeddings_chosen = embeddings[:n_samples]
@@ -60,7 +60,7 @@ class SteerablePluralismTrainer(Trainer):
 
         n_contexts = len(context_ids_chosen)
         print(f"chosen context ids shape: {context_ids_chosen}")
-        context_embeddings = model.tokenizer(context_ids_chosen + context_ids_rejected)
+        context_embeddings = model.tokenizer.encoder(context_ids_chosen + context_ids_rejected)
         print(f"context embeddings shape: {context_embeddings.shape}")
         context_embeddings_chosen = context_embeddings[:n_contexts]
         context_embeddings_rejected = context_embeddings[n_contexts:]

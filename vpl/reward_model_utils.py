@@ -11,6 +11,25 @@ def load_data():
         token=True,
     )
 
+
+class Decoder(nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super(Decoder, self).__init__()
+        self._model = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.LeakyReLU(0.2),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.LeakyReLU(0.2),
+            nn.Linear(hidden_dim, 1),
+        )
+
+    def forward(self, xc, xr, z):
+        xc = torch.cat([xc, z], dim=1)
+        xr = torch.cat([xr, z], dim=1)
+        rc = self._model(xc)
+        rr = self._model(xr)
+        return rc, rr
+
 class RewardModel(nn.Module):
     def __init__(
         self,
@@ -46,10 +65,10 @@ class RewardModel(nn.Module):
         self.saved_embeddings.uniform_(-1, 1)
 
     def encode_pair(self, context_chosen, context_rejected):
-        pass
+        return self.pair_encoder(e_c, e_r)
 
     def encode_sequence(self, pair_embeddings, seq_start_end):
-        pass
+        return self.sequence_encoder(sequences, seq_start_end)
 
     def decode(self):
         pass
@@ -76,6 +95,49 @@ class RewardModel(nn.Module):
 
         return reward_chosen, reward_rejected, mean, log_var, z
 
-class RewardTrainer():
-    pass
+class RewardTrainer(Trainer):
+    def compute_loss(self, model, inputs, return_outputs=False):
+        batch_size = inputs["input_ids_chosen"].shape[0]
+        embeddings = model.tokenizer(
+            inputs["input_ids_chosen"] + inputs["input_ids_rejected"]
+        )
+
+        embeddings_chosen = embeddings[:batch_size]
+        embeddings_rejected = embeddings[batch_size:]
+
+        context_input_ids_chosen = inputs["contexts_input_ids_chosen"]
+        token_length_chosen = torch.eq(input_ids_chosen,
+                                        model.llm_contexts_encoder.config.pad_token_id).int().argmax(-1) - 1
+        input_ids_rejected = inputs["contexts_input_ids_rejected"]
+        token_length_rejected = torch.eq(input_ids_rejected,
+                                            model.llm_contexts_encoder.config.pad_token_id).int().argmax(-1) - 1
+
+        with torch.no_grad():
+            last_hidden_state_chosen = model.llm_contexts_encoder(
+                input_ids=input_ids_chosen,
+                output_hidden_states=True
+            ).hidden_states[-1]
+
+            contexts_embeddings_chosen = sum_embeddings / num_of_none_padding_tokens_chosen
+            last_hidden_state_rejected = model.llm_contexts_encoder(
+                input_ids=input_ids_rejected,
+                output_hidden_states=True
+            ).hidden_states[-1]
+
+            contexts_embeddings_rejected = sum_embeddings / num_of_none_padding_tokens_rejected
+        seq_start_end = inputs["seq_start_end"]
+        user_type = torch.tensor(inputs["user_type"]).to(device).bfloat16()
+        rewards_chosen, rewards_rejected, mean, log_var, z = model(
+            embeddings_chosen,
+            embeddings_rejected,
+            contexts_embeddings_chosen,
+            contexts_embeddings_rejected,
+            seq_start_end,
+            user_type,
+            ground_truth_user_vector=False,  # todo: set to True for debug usage
+        )
+
+        reproduction_loss = self.loss(rewards_chosen, rewards_rejected)
+
+
 

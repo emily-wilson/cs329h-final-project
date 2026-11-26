@@ -3,6 +3,7 @@ import torch
 
 class BaseAlignmentFunction(nn.Module):
     def __init__(self, num_attrs):
+        super(BaseAlignmentFunction, self).__init__()
         self._sample_model = nn.Linear(num_attrs, num_attrs)
         self._context_model = nn.Linear(num_attrs, num_attrs)
 
