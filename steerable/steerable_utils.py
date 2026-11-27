@@ -48,22 +48,24 @@ class SteerablePluralismTrainer(Trainer):
         context_ids_chosen = inputs["context_ids_chosen"]
         context_ids_rejected = inputs["context_ids_rejected"]
 
+        chosen_input_np = input_ids_chosen.detach().cpu().numpy()
+        rejected_input_np = input_ids_rejected.detach().cpu().numpy()
         print(f"chosen input ids shape: {input_ids_chosen.shape}")
-        embeddings = model.tokenizer.encode(input_ids_chosen + input_ids_rejected)
-        print(f"embeddings shape: {embeddings}")
-
-        embeddings_chosen = embeddings[:n_samples]
-        embeddings_rejected = embeddings[n_samples:]
+        ## Input tensors are already padded so we can probably tokenize separately
+        embeddings_chosen = model.tokenizer.encode(chosen_input_np, sr=inputs["sr"]).audio_codes
+        embeddings_rejected = model.tokenizer.encode(rejected_input_np, sr=inputs["sr"]).audio_codes
+        print(f"embeddings shape: {embeddings_chosen}")
 
         chosen_ind = random.randint(0, 1)
         options = [embeddings_chosen, embeddings_rejected] if chosen_ind == 0 else [embeddings_rejected, embeddings_chosen]
 
         n_contexts = len(context_ids_chosen)
         print(f"chosen context ids shape: {context_ids_chosen}")
-        context_embeddings = model.tokenizer.encoder(context_ids_chosen + context_ids_rejected)
-        print(f"context embeddings shape: {context_embeddings.shape}")
-        context_embeddings_chosen = context_embeddings[:n_contexts]
-        context_embeddings_rejected = context_embeddings[n_contexts:]
+        context_chosen_np = context_ids_chosen.detach().cpu().numpy()
+        context_rejected_np = context_ids_rejected.detach().cpu().numpy()
+        context_embeddings_chosen = model.tokenizer.encode(context_chosen_np, sr=inputs["sr"]).audio_codes
+        context_embeddings_rejected = model.tokenizer.encode(context_rejected_np, sr=inputs["sr"]).audio_codes
+        print(f"context embeddings shape: {context_embeddings_chosen.shape}")
 
         fns = model(options, context_embeddings_chosen, context_embeddings_rejected)
         assert fns.shape() == (2, 1)

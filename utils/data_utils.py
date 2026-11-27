@@ -45,7 +45,7 @@ class DataCollator:
             "audio",
             split=self.split,
             token=True,
-            columns=["audio_key", "audio"]
+            columns=["audio_key", "audio", "sample_rate"]
         )
 
         audio_by_audio_key = {a["audio_key"]: a["audio"] for a in audio}
@@ -64,30 +64,38 @@ class DataCollator:
             audios_chosen.append(chosen_audio_ids)
             audios_rejected.append(rejected_audio_ids)
 
-            contexts_chosen.append(self.__get_user_context(feature["audio_keys_contexts_chosen"], audio_by_audio_key))
-            contexts_rejected.append(self.__get_user_context(feature["audio_keys_contexts_rejected"], audio_by_audio_key))
+            contexts_chosen.extend(self.__get_user_context(feature["audio_keys_contexts_chosen"], audio_by_audio_key))
+            contexts_rejected.extend(self.__get_user_context(feature["audio_keys_contexts_rejected"], audio_by_audio_key))
 
+        print(audios_chosen[0])
         input_ids = pad_sequence(
-            torch.cat(audios_chosen, audios_rejected),
+            [*audios_chosen, *audios_rejected],
             batch_first=True,
             padding_value=self.padding_value
         )
         tensor_len = input_ids.shape[1]
         input_ids = input_ids.reshape((2, len(features), tensor_len))
 
+        num_contexts = len(contexts_chosen) // len(features)
+        print(f"chosen contexts shape: {contexts_chosen[0].shape}")
         context_ids = pad_sequence(
-            torch.cat(contexts_chosen, contexts_rejected),
+            [
+                *contexts_chosen,
+                *contexts_rejected
+            ],
             batch_first=True,
             padding_value=self.padding_value
         )
         context_tensor_len = context_ids.shape[1]
-        context_ids = context_ids.reshape((2, len(features), context_tensor_len))
+        context_ids = context_ids.reshape((2, len(features), num_contexts, context_tensor_len))
 
         return {
             "chosen_input_ids": input_ids[0],
             "rejected_input_ids": input_ids[1],
             "context_ids_chosen": context_ids[0],
-            "context_ids_rejected": context_ids[1]
+            "context_ids_rejected": context_ids[1],
+            ## This is pretty hacky but I think most datasets generally all use the same sampling rate
+            "sr": audio[0]["sample_rate"]
         }
 
 def get_dataset_with_context(num_contexts = 2, split="train"):
@@ -158,60 +166,3 @@ def get_dataset_with_context(num_contexts = 2, split="train"):
     responses = responses.map(fill_context)
 
     return responses
-
-if __name__ == "__main__":
-    dataset = get_dataset_with_context()
-
-    audio = load_dataset(
-        "datapointai/text-to-speech-human-preferences-315k",
-        "audio",
-        split="train",
-        token=True,
-        columns=["audio_key", "audio"]
-    )
-
-    audio_by_audio_key = {a["audio_key"]: a["audio"] for a in audio}
-
-    def __get_user_context(audio_keys, audio_by_audio_key):
-        user_contexts = []
-
-        for context in audio_keys:
-            context_audio = audio_by_audio_key[context]
-
-            context_ids = context_audio.get_all_samples().data.flatten()
-            user_contexts.append(context_ids)
-
-        return user_contexts
-
-    audios_chosen = []
-    audios_rejected = []
-    contexts_chosen = []
-    contexts_rejected = []
-    for feature in dataset:
-        chosen_audio = audio_by_audio_key[feature["chosen_audio_key"]]
-        rejected_audio = audio_by_audio_key[feature["rejected_audio_key"]]
-
-        chosen_audio_ids = chosen_audio.get_all_samples().data.flatten()
-        rejected_audio_ids = rejected_audio.get_all_samples().data.flatten()
-        
-        audios_chosen.append(chosen_audio_ids)
-        audios_rejected.append(rejected_audio_ids)
-
-        contexts_chosen.append(__get_user_context(feature["audio_keys_contexts_chosen"], audio_by_audio_key))
-        contexts_rejected.append(__get_user_context(feature["audio_keys_contexts_rejected"], audio_by_audio_key))
-
-    input_ids = pad_sequence(
-        torch.cat([audios_chosen, audios_rejected], dim=0),
-        batch_first=True,
-        padding_value=-1
-    )
-    tensor_len = input_ids.shape[1]
-    input_ids = input_ids.reshape((2, len(features), tensor_len))
-
-    context_ids = pad_sequence(
-        torch.cat([contexts_chosen, contexts_rejected]),
-        batch_first=True,
-        padding_value=-1
-    )
-    context_tensor_len = context_ids.shape[1]
-    context_ids = context_ids.reshape((2, len(features), context_tensor_len))
